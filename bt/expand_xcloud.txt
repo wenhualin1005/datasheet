@@ -1,0 +1,99 @@
+#!/bin/sh   
+iso_name=".128M.iso"                                                                                                                                               
+iso_expand_name=".128M_expand.iso"
+
+action_ipk(){                                                                                                                                                          
+        Path="/opt/app/appinstalled/"                                                                                                                                
+        if [ ! -d $Path ]; then                                                                                                                                      
+                return                                                                                                                                               
+        fi                                                                                                                                                           
+                                                                                                                                                                     
+        AllFile=`ls $Path`                                                                                                                                           
+        AutoRun_IPK="1"                                                                                                                                              
+        for EachFile in ${AllFile}                                                                                                                                   
+        do                                                                                                                                                           
+                OneFilePath=`printf "%s%s" "$Path" "$EachFile"`                                                                                                      
+                AutoRun=`cat ${OneFilePath} | grep "plugin_Autorun" |awk -F ":" '{print $2}' | awk -F " " '{print $1}' | awk -F "\"" '{print $2}'`                   
+                if  [ "$AutoRun" = "$AutoRun_IPK" ]; then                                                                                                            
+                        AppInstallPath=`cat ${OneFilePath} | grep "plugin_IntallPath"  |awk -F ":" '{print $2}' | awk -F " " '{print $1}' | awk -F "\"" '{print $2}'`
+                        AppShellCtl=`printf "/opt/app/%s/appshell %s" "$AppInstallPath" "$1"`                                                                           
+                        $AppShellCtl &                                                                                                                               
+                fi                                                                                                                                                   
+        done                                                                                                                                                         
+}                                                                                                                                                                    
+                                                                                                                                                                     
+check_size_and_create_128M()                                                                                                                                         
+{                                                                                                                                                                                                                                                                                                    
+        local free_size=`df -m | grep -w $mount_device  | awk  '{print $4}'`                                                                                         
+        if [ "$free_size" -gt 128 ];then                                                                                                                             
+                dd if=/dev/zero of=/mnt/$mount_device/$iso_expand_name bs=1M count=128                                                                                      
+                mkfs.ext4 /mnt/$mount_device/$iso_expand_name <<-EOF                                                                                                         
+                Y                                                                                                                                                    
+                EOF                                                                                                                                                  
+                                                                                                                                                                     
+                return 0                                                                                                                                             
+        else                                                                                                                                                         
+                return 1                                                                                                                                             
+        fi                                                                                                                                                           
+}                    
+
+mount_opt()
+{
+        mkdir -p /opt
+        mkdir -p /opt/lib
+        mount -t ext4 /mnt/$mount_device/$iso_name /opt 2>&1
+        #for xcloud client
+        if [ -f /usr/local/xcloud/bin/searchSharePath.sh ]; then
+                /usr/local/xcloud/bin/searchSharePath.sh ${mount_device} /mnt/${mount_device}
+        fi
+        check_opt=`mount | grep "/opt"`
+        if [ -n "$check_opt" ]; then
+                xcloud_notify 0 5 "{'partition':\"/dev/$mount_device\"}"
+                echo "/dev/$mount_device /mnt/$mount_device" > /tmp/usbdir
+                ipaddr=`uci get network.lan.ipaddr 2>/dev/null`
+                wget -O /dev/null "http://$ipaddr:14000/api?method=notify_usb_mounted&is_data_source=yes&device=/dev/$mount_device&mount_point=/mnt/$mount_device" 1>/dev/null 2>&1
+                rm -rf /www/opt
+                ln -s /opt/ /www/opt
+                return 0
+        fi
+        return 1
+}
+
+xcloud_file="/tmp/usbdir"
+if [ ! -f "$xcloud_file" ];then
+	exit 1
+fi
+mount_device=`cat $xcloud_file | awk '{print $1}' | awk -F "/" '{print $3}'`
+if [ "$mount_device" = "" ]; then
+	exit 1
+fi
+                                                                                                                                              
+check_size_and_create_128M    
+if [ $? -ne 0 ]; then
+	exit 1
+fi                                                                                                                                      
+action_ipk stop                                                                                                                                                          
+sleep 30
+umount /opt
+rm -rf /www/opt 
+cat /mnt/$mount_device/$iso_expand_name >> /mnt/$mount_device/$iso_name                                                                                                                       
+e2fsck -f -y /mnt/$mount_device/$iso_name 
+/mnt/$mount_device/resize2fs /mnt/$mount_device/$iso_nam  
+mount_opt
+if [ $? -ne 0 ]; then
+	exit 1
+fi 
+action_ipk start
+exit 0
+
+                                                                                                                                                             
+#dd if=/dev/zero of=/mnt/sda1/.256M.iso bs=1M count=128                                                                                                              
+#dd if=/dev/zero of=/mnt/$mount_device/$iso_name bs=1M count=128                                                                                                     
+#mkfs.ext4 /mnt/$mount_device/$iso_name<<-EOF                                                                                                                        
+#Y                                                                                                                                                                   
+#EOF                                                                                                                                                                 
+#mkfs.ext4 /mnt/sda1/$iso_name                                                                                                                                       
+#cat /mnt/sda1/$iso_name >> /mnt/sda1/.128M.iso                                                                                                                       
+#e2fsck -f -y /mnt/sda1/.128M.iso                                                                                                                                     
+#/mnt/sda1/resize2fs /mnt/sda1/.128M.iso                                                                                                                              
+#mount -t ext4 /mnt/sda1/.128M.iso /mnt/loop/ 
